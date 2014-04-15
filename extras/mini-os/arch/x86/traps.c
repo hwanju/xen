@@ -119,7 +119,7 @@ void page_walk(unsigned long virt_address)
 static int handle_cow(unsigned long addr) {
         pgentry_t *tab = (pgentry_t *)start_info.pt_base, page;
 	unsigned long new_page;
-	int rc;
+	int rc = 0;
 
 #if defined(__x86_64__)
         page = tab[l4_table_offset(addr)];
@@ -147,9 +147,16 @@ static int handle_cow(unsigned long addr) {
 	new_page = alloc_pages(0);
 	memset((void*) new_page, 0, PAGE_SIZE);
 
-	rc = HYPERVISOR_update_va_mapping(addr & PAGE_MASK, __pte(virt_to_mach(new_page) | L1_PROT), UVMF_INVLPG);
-	if (!rc)
-		return 1;
+    if (!xen_feature(XENFEAT_auto_translated_physmap)) {
+        rc = HYPERVISOR_update_va_mapping(addr & PAGE_MASK, __pte(virt_to_mach(new_page) | L1_PROT), UVMF_INVLPG);
+        if (!rc)
+            return 1;
+    }
+    else {
+        tab[l1_table_offset(addr)] = virt_to_mach(new_page) | L1_PROT;
+        native_flush_tlb_single(addr);
+        return 1;
+    }
 
 	printk("Map zero page to %lx failed: %d.\n", addr, rc);
 	return 0;
