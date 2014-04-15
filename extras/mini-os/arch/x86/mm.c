@@ -589,13 +589,13 @@ void do_map_frames(unsigned long va,
     unsigned long i;
     int rc;
 
-    if ( !mfns ) 
+    if ( !xen_feature(XENFEAT_auto_translated_physmap) && !mfns ) 
     {
         printk("do_map_frames: no mfns supplied\n");
         return;
     }
     DEBUG("va=%p n=0x%lx, mfns[0]=0x%lx stride=0x%lx incr=0x%lx prot=0x%lx\n",
-          va, n, mfns[0], stride, incr, prot);
+          va, n, mfns ? mfns[0] : 0, stride, incr, prot);
 
     if ( err )
         memset(err, 0x00, n * sizeof(int));
@@ -619,22 +619,29 @@ void do_map_frames(unsigned long va,
                 if ( !pgt || !(va & L1_MASK) )
                     pgt = need_pgt(va);
                 
-                mmu_updates[i].ptr = virt_to_mach(pgt) | MMU_NORMAL_PT_UPDATE;
-                mmu_updates[i].val = ((pgentry_t)(mfns[(done + i) * stride] +
-                                                  (done + i) * incr)
-                                      << PAGE_SHIFT) | prot;
-            }
-
-            rc = HYPERVISOR_mmu_update(mmu_updates, todo, NULL, id);
-            if ( rc < 0 )
-            {
-                if (err)
-                    err[done * stride] = rc;
-                else {
-                    printk("Map %ld (%lx, ...) at %p failed: %d.\n",
-                           todo, mfns[done * stride] + done * incr, va, rc);
-                    do_exit();
+                if (!xen_feature(XENFEAT_auto_translated_physmap)) {
+                    mmu_updates[i].ptr = virt_to_mach(pgt) | MMU_NORMAL_PT_UPDATE;
+                    mmu_updates[i].val = ((pgentry_t)(mfns[(done + i) * stride] +
+                                                      (done + i) * incr)
+                                          << PAGE_SHIFT) | prot;
                 }
+                else
+                    *pgt = (to_phys(va) & PAGE_MASK) | prot;
+            }
+            if (!xen_feature(XENFEAT_auto_translated_physmap)) {
+                rc = HYPERVISOR_mmu_update(mmu_updates, todo, NULL, id);
+                if ( rc < 0 )
+                {
+                    if (err)
+                        err[done * stride] = rc;
+                    else {
+                        printk("Map %ld (%lx, ...) at %p failed: %d.\n",
+                                todo, mfns[done * stride] + done * incr, va, rc);
+                        do_exit();
+                    }
+                }
+            }
+            else {
             }
         }
         done += todo;
