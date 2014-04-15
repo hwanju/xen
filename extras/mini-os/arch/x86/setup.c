@@ -115,16 +115,18 @@ arch_init(start_info_t *si)
 	/* Grab the shared_info pointer and put it in a safe place. */
 	HYPERVISOR_shared_info = map_shared_info(start_info.shared_info);
 
-	    /* Set up event and failsafe callback addresses. */
+	/* Set up event and failsafe callback addresses. */
+    if (!xen_feature(XENFEAT_hvm_callback_vector)) {
 #ifdef __i386__
-	HYPERVISOR_set_callbacks(
-		__KERNEL_CS, (unsigned long)hypervisor_callback,
-		__KERNEL_CS, (unsigned long)failsafe_callback);
+        HYPERVISOR_set_callbacks(
+                __KERNEL_CS, (unsigned long)hypervisor_callback,
+                __KERNEL_CS, (unsigned long)failsafe_callback);
 #else
-	HYPERVISOR_set_callbacks(
-		(unsigned long)hypervisor_callback,
-		(unsigned long)failsafe_callback, 0);
+        HYPERVISOR_set_callbacks(
+                (unsigned long)hypervisor_callback,
+                (unsigned long)failsafe_callback, 0);
 #endif
+    }
 
 
 }
