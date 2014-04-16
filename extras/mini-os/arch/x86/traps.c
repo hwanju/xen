@@ -154,7 +154,7 @@ static int handle_cow(unsigned long addr) {
     }
     else {
         tab[l1_table_offset(addr)] = virt_to_mach(new_page) | L1_PROT;
-        native_flush_tlb_single(addr);
+        flush_tlb_single(addr);
         return 1;
     }
 

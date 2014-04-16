@@ -881,7 +881,7 @@ static void clear_bootstrap(void)
     else {
         pgentry_t *pgt = need_pgt(0);
         *pgt = 0;
-        native_flush_tlb_single(0);
+        flush_tlb_single(0);
     }
 }
 

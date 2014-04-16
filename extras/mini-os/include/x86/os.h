@@ -145,6 +145,17 @@ do {    \
     HYPERVISOR_mmuext_op(&op, 1, &count, DOMID_SELF);   \
 } while(0)
 
+#define xen_flush_tlb_single(addr)  \
+do {    \
+    mmuext_op_t op = {                          \
+        .cmd = MMUEXT_INVLPG_LOCAL,             \
+        .arg1.linear_addr = addr & PAGE_MASK,   \
+    };                                          \
+    int count;                                  \
+    HYPERVISOR_mmuext_op(&op, 1, &count, DOMID_SELF);   \
+} while(0)
+
+
 #ifndef CONFIG_PVH
 #define __cli()             xen_irq_disable()
 #define __sti()             xen_irq_enable()
@@ -160,6 +171,7 @@ do {  \
 #define read_cr2()          xen_read_cr2()
 #define flush_tlb_global()  xen_flush_tlb_global()
 #define flush_tlb()         xen_flush_tlb()
+#define flush_tlb_single(addr)  xen_flush_tlb_single(addr)
 #define pvh_early_init()
 #else
 extern unsigned long __force_order;
@@ -273,9 +285,6 @@ static inline void native_flush_tlb_global(void)
     native_restore_fl(flags);
 }
 
-/* currently, PV mini-os flushs a single tlb entry only by piggybacking
- * flush command in HYPERVISOR_update_va_mapping, not using mmuext_op,
- * so no need to have a general flush_tlb_single by now */
 static inline void native_flush_tlb_single(unsigned long addr)
 {
     asm volatile("invlpg (%0)" ::"r" (addr) : "memory");
@@ -356,6 +365,14 @@ do {            \
     else                                \
         xen_flush_tlb();        \
 } while(0);
+
+#define flush_tlb_single(addr)          \
+do {									\
+    if (xen_feature(XENFEAT_auto_translated_physmap))   \
+        native_flush_tlb_single(addr);   \
+    else                        \
+        xen_flush_tlb_single(addr);      \
+} while (0)
 
 static inline void pvh_early_init(void)
 {
