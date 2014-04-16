@@ -142,6 +142,7 @@ KERNEL_CS_MASK = 0xfc
 	testl $NMI_MASK,2*8(%rsp)
 	jnz   2f
 
+	orb   $0x10,1*8(%rsp)   # FIXME: same trick in xen_hvm_callback_vector
 	testb $1,(xen_features+XENFEAT_supervisor_mode_kernel)
 	jnz   1f
 

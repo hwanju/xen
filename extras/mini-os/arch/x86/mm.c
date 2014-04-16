@@ -625,8 +625,13 @@ void do_map_frames(unsigned long va,
                                                       (done + i) * incr)
                                           << PAGE_SHIFT) | prot;
                 }
-                else
-                    *pgt = (to_phys(va) & PAGE_MASK) | prot;
+                else {
+                    if (mfns)
+                        *pgt = ((pgentry_t)(mfns[(done + i) * stride] +
+                                (done + i) * incr) << PAGE_SHIFT) | prot;
+                    else        /* for grant table */
+                        *pgt = (to_phys(va) & PAGE_MASK) | prot;
+                }
             }
             if (!xen_feature(XENFEAT_auto_translated_physmap)) {
                 rc = HYPERVISOR_mmu_update(mmu_updates, todo, NULL, id);
