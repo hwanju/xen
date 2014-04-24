@@ -98,10 +98,9 @@ arch_init(start_info_t *si)
         fpu_init();
 
 	/* Initialize SSE */
-    /* FIXME: in pvh mode, sse_init incurs triple faults */
-	if (!xen_feature(XENFEAT_auto_translated_physmap) &&
-        !xen_feature(XENFEAT_hvm_callback_vector))
-		sse_init();
+    if (xen_feature(XENFEAT_hvm_callback_vector))
+        native_write_cr4(native_read_cr4() | (1UL << 9)  /* OSFXSR */);
+    sse_init();
 
 	/* Copy the start_info struct to a globally-accessible area. */
 	/* WARN: don't do printk before here, it uses information from
