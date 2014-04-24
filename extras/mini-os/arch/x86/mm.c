@@ -646,8 +646,6 @@ void do_map_frames(unsigned long va,
                     }
                 }
             }
-            else {
-            }
         }
         done += todo;
     }
