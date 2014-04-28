@@ -99,7 +99,7 @@ arch_init(start_info_t *si)
 
 	/* Initialize SSE */
     if (xen_feature(XENFEAT_hvm_callback_vector))
-        native_write_cr4(native_read_cr4() | (1UL << 9)  /* OSFXSR */);
+        enable_osfxsr();
     sse_init();
 
 	/* Copy the start_info struct to a globally-accessible area. */

@@ -173,6 +173,7 @@ do {  \
 #define flush_tlb()         xen_flush_tlb()
 #define flush_tlb_single(addr)  xen_flush_tlb_single(addr)
 #define pvh_early_init()
+#define enable_osfxsr()
 #else
 extern unsigned long __force_order;
 
@@ -390,6 +391,10 @@ static inline void pvh_early_init(void)
 #endif
 }
 
+static inline void enable_osfxsr(void)
+{
+    native_write_cr4(native_read_cr4() | (1UL << 9)  /* OSFXSR */);
+}
 #endif
 
 #define local_irq_save(x)	__save_and_cli(x)
