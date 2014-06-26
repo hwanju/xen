@@ -16,6 +16,7 @@
 #include <mini-os/netfront.h>
 #include <mini-os/lib.h>
 #include <mini-os/semaphore.h>
+#include <mini-os/nf10_lbuf_api.h>
 
 DECLARE_WAIT_QUEUE_HEAD(netfront_queue);
 
@@ -53,6 +54,7 @@ struct netfront_dev {
     char *nodename;
     char *backend;
     char *mac;
+    int nfback;     /* NetFPGA */
 
     xenbus_event_queue events;
 
@@ -93,11 +95,91 @@ static inline int xennet_rxidx(RING_IDX idx)
     return idx & (NET_RX_RING_SIZE - 1);
 }
 
+/* basic fetching each packet from lbuf */
+#define NF_DEBUG
+#ifdef NF_DEBUG
+#define nfdebug(args...)	printk(args)
+#else
+#define nfdebug(args...)
+#endif
+/* return codes: to make network_rx func to be changed a few */
+#define LBUF_NO_PKT     0
+#define LBUF_MORE_PKT   1
+#define LBUF_LAST_PKT   2
+static int fetch_pkt_from_lbuf(unsigned char **page, struct netif_rx_response *rx)
+{
+    static unsigned int nr_dwords;
+    static unsigned int dword_idx;
+    static unsigned int pkt_len, remaing_pkt_len;
+    static unsigned char temp_buf[PAGE_SIZE];
+
+    unsigned int dword_idx_in_page;
+    unsigned int chunk_len;
+    unsigned short offset = 0;
+    unsigned char *buf_addr = *page;
+    unsigned char *pkt_addr;
+
+    /* start of lbuf */
+    if (nr_dwords == 0) {
+        nr_dwords = LBUF_NR_DWORDS(buf_addr);
+        dword_idx = LBUF_FIRST_DWORD_IDX();
+        nfdebug("S==== nr_dwords=%u dword_idx=%u\n", nr_dwords, dword_idx);
+    }
+    /* merge second chunk of split packet */
+    if (remaing_pkt_len > 0) {
+        chunk_len = pkt_len - remaing_pkt_len;
+        nfdebug("  <MERGE: clen=%u pkt_len=%u rem=%u addr=%p\n",
+               chunk_len, pkt_len, remaing_pkt_len, buf_addr);
+        memcpy(temp_buf + chunk_len, buf_addr, remaing_pkt_len);
+        remaing_pkt_len = 0;
+        *page = temp_buf;   /* change original ring buf to temp buf */
+        goto out_update;
+    }
+
+    dword_idx_in_page = ((dword_idx << 2) & ~PAGE_MASK) >> 2;
+    pkt_len  = LBUF_PKT_LEN(buf_addr, dword_idx_in_page);
+    pkt_addr = LBUF_PKT_ADDR(buf_addr, dword_idx_in_page);
+    offset =  pkt_addr - buf_addr;
+
+    /* copy 1st patial chunk if a packet crosses two different pages */
+    if (offset + pkt_len > PAGE_SIZE) {
+        chunk_len = PAGE_SIZE - offset;
+        remaing_pkt_len = pkt_len - chunk_len;
+        if (likely(chunk_len > 0))
+            memcpy(temp_buf, pkt_addr, chunk_len);
+        nfdebug("  >SPLIT: clen=%u pkt_len=%u rem=%u addr=%p offset=%u\n",
+               chunk_len, pkt_len, remaing_pkt_len, buf_addr, offset);
+        return LBUF_NO_PKT;
+    }
+
+out_update:
+    dword_idx = LBUF_NEXT_DWORD_IDX(dword_idx, pkt_len);
+    rx->offset = offset;
+    rx->status = pkt_len;
+
+    nfdebug("-- RET: nr_dwords=%u dip=%u ndi=%u offset=%u pkt_len=%u addr=%p\n",
+           nr_dwords, dword_idx_in_page, dword_idx, offset, pkt_len, buf_addr);
+
+    /* do final check not to confuse a next page as the end of lbuf */
+    if (dword_idx >= nr_dwords) {
+        nfdebug("E==== nr_dwords=%u dword_idx=%u\n", nr_dwords, dword_idx);
+        nr_dwords = 0;
+        return LBUF_LAST_PKT;
+    }
+
+    if (((dword_idx << 2) & ~PAGE_MASK) == 0)
+        return LBUF_LAST_PKT;
+
+    return LBUF_MORE_PKT;
+}
+
 void network_rx(struct netfront_dev *dev)
 {
     RING_IDX rp,cons,req_prod;
     struct netif_rx_response *rx;
     int nr_consumed, some, more, i, notify;
+    int ret;
+    static unsigned long rx_packets;
 
 
 moretodo:
@@ -131,6 +213,14 @@ moretodo:
         page = (unsigned char*)buf->page;
         gnttab_end_access(buf->gref);
 
+fetch_pkt_again:
+        if (dev->nfback) {    /* FIXME: for performance upper-bound test */
+            page = buf->page;
+            if ((ret = fetch_pkt_from_lbuf(&page, rx)) == LBUF_NO_PKT)
+                continue;
+            rx_packets++;
+            nfdebug("id=%d rx=%lu\n", id, rx_packets);
+        }
         if(rx->status>0)
         {
 #ifdef HAVE_LIBC
@@ -146,6 +236,8 @@ moretodo:
 #endif
 		dev->netif_rx(page+rx->offset,rx->status);
         }
+        if (dev->nfback && ret == LBUF_MORE_PKT)
+            goto fetch_pkt_again;
     }
     dev->rx.rsp_cons=cons;
 
@@ -437,6 +529,11 @@ done:
         printk("%s: backend/mac failed\n", __func__);
         goto error;
     }
+
+    snprintf(path, sizeof(path), "%s/feature-nfback", dev->backend);
+    dev->nfback = xenbus_read_integer(path) > 0 ? 1 : 0;
+    if (dev->nfback)
+        printk("nfback supported\n",dev->backend);
 
     printk("backend at %s\n",dev->backend);
     printk("mac is %s\n",dev->mac);
